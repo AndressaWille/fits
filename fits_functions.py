@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from reproject import reproject_interp
 import os
+import pandas as pd
 
 # --------- # --------- #
 
@@ -239,17 +240,23 @@ def build_datacube(aligned_fits_files, reference_file, output_path):
 
     aligned_images = []
     filter_names = []
+    units = []
 
-    # Get aligned fits
+    # Get aligned fits, filter names, units
     for file, filt in aligned_fits_files:
         with fits.open(file) as hdul:
             ext = next((i for i, h in enumerate(hdul) if h.data is not None and isinstance(h.data, np.ndarray)), None)
             if ext is None:
-                print(f"Warning: '{file}' contains no valid image data.")
+                print(f"No data extension found in '{file}'.")
                 continue
             data = hdul[ext].data
+            
+            unit = hdul[ext].header.get('BUNIT', 'unknown')  
+            print(f"Filter {filt}: unity = {unit}")  # you can comment this line, it's just a verification
+        
             aligned_images.append(data)
             filter_names.append(filt)
+            units.append(unit)
 
     # Stack images into 3D cube
     cube = np.array(aligned_images)
@@ -279,10 +286,21 @@ def build_datacube(aligned_fits_files, reference_file, output_path):
 
     # Build header
     cube_header = wcs_3d.to_header()
+    
     cube_header['NAXIS'] = 3
     cube_header['NAXIS1'] = nx
     cube_header['NAXIS2'] = ny
     cube_header['NAXIS3'] = len(filter_names)
+    
+    if units: # this part is working but after saving the datacube if you do print(hdul[0].header.get('BUNIT')), it returns "None" :(
+        if all(u == units[0] for u in units):
+            cube_header['BUNIT'] = units[0]
+        else:
+            print('Different units', units)
+            cube_header['BUNIT'] = 'unknown'
+    else:
+        print('No BUNIT found in original fits.')
+        cube_header['BUNIT'] = 'unknown'
 
     for i, filt in enumerate(filter_names):
         cube_header[f'FILTER{i+1}'] = filt  # the name of the filter doesn't appear when you open the datacube in DS9... this information is just added in the header of the files :(
@@ -314,6 +332,7 @@ def cut_region(cube_fits_file, x_start, x_end, y_start, y_end, output_path):
     None
         Saves the cut datacube.
     """
+    # Open datacube
     with fits.open(cube_fits_file) as hdul:
         cube_data = hdul[0].data
         cube_header = hdul[0].header
@@ -348,6 +367,4 @@ def cut_region(cube_fits_file, x_start, x_end, y_start, y_end, output_path):
         fits.PrimaryHDU(cut_data, header=new_header).writeto(output_path, overwrite=True)
         print(f"Cut datacube saved to '{output_path}'")
         
-        
-        
-
+       
