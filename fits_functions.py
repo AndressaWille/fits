@@ -175,6 +175,8 @@ def align_fits(fits_files, reference_file):
         List of aligned image arrays.
     filter_names : list of str
         List of filter names corresponding to each image.
+        
+    Saves the files.
     """
     # Open reference filter
     with fits.open(reference_file) as hdul_ref:
@@ -195,6 +197,9 @@ def align_fits(fits_files, reference_file):
 
             data = hdul[ext].data
             wcs_in = WCS(hdul[ext].header, hdul)
+            
+            unit = hdul[ext].header.get('BUNIT', 'unknown')  
+            print(f"Filter {filt}: unity = {unit}")  
 
             data_aligned, _ = reproject_interp((data, wcs_in), ref_header)
 
@@ -208,6 +213,50 @@ def align_fits(fits_files, reference_file):
             print(f"Saved at '{aligned_name}'")
 
     return aligned_filenames
+    
+
+
+def MJy_sr_to_Jy(aligned_fits_files):
+    """
+    Converts fits files from MJy/sr to Jy/pixel using PIXAR_SR information and save corrected files.
+    
+    Parameters
+    ----------
+    aligned_fits_files : list of tuples
+        [(filename, filter_name), ...]
+    Returns
+    -------
+    None
+        Saves the fits.
+    """
+    # Read files and get PIXAR_SR (pixel area in steradians) 
+    for file, filt in aligned_fits_files:
+        with fits.open(file) as hdul:
+            ext = find_data_extension(hdul)
+            if ext is None:
+                print(f"No data extension found in '{file}'. Skipping.")
+                continue
+
+            data = hdul[ext].data.astype(np.float64)
+            header = hdul[ext].header.copy()  
+            
+            pixar_sr = header.get('PIXAR_SR')
+            if pixar_sr is None:
+                print(f"PIXAR_SR not found in '{file}'. Skipping.")
+                continue
+
+            # Calculate conversion factor (using MJy = 1e6 Jy)
+            factor = 1e6 * pixar_sr
+            data_jy = data * factor
+
+            # Update BUNIT
+            header['BUNIT'] = 'Jy'
+            header.add_history(f'Converted from MJy/sr to Jy/pixel using PIXAR_SR={pixar_sr}')
+
+            # Save corrected file
+            corr_name = os.path.splitext(file)[0] + '_Jy.fits'
+            fits.PrimaryHDU(data_jy, header=header).writeto(corr_name, overwrite=True)
+            print(f"Saved at '{corr_name}'")
     
     
 # --------- # --------- #
